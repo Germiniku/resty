@@ -956,16 +956,6 @@ func TestPutJSONString(t *testing.T) {
 
 	client := dc()
 
-	client.OnBeforeRequest(func(c *Client, r *Request) error {
-		r.SetHeader("X-Custom-Request-Middleware", "OnBeforeRequest middleware")
-		return nil
-	})
-	client.OnBeforeRequest(func(c *Client, r *Request) error {
-		c.SetContentLength(true)
-		r.SetHeader("X-ContentLength", "OnBeforeRequest ContentLength set")
-		return nil
-	})
-
 	client.SetDebug(true)
 	client.outputLogTo(ioutil.Discard)
 
@@ -998,15 +988,6 @@ func TestOnBeforeMiddleware(t *testing.T) {
 	defer ts.Close()
 
 	c := dc()
-	c.OnBeforeRequest(func(c *Client, r *Request) error {
-		r.SetHeader("X-Custom-Request-Middleware", "OnBeforeRequest middleware")
-		return nil
-	})
-	c.OnBeforeRequest(func(c *Client, r *Request) error {
-		c.SetContentLength(true)
-		r.SetHeader("X-ContentLength", "OnBeforeRequest ContentLength set")
-		return nil
-	})
 
 	resp, err := c.R().
 		SetBody("OnBeforeRequest: This is plain text body to server").

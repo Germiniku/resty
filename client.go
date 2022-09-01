@@ -67,7 +67,14 @@ var (
 	bufPool           = &sync.Pool{New: func() interface{} { return &bytes.Buffer{} }}
 )
 
+func MyMiddleware(c *Client, r *Request) func(*Client, *Response) error {
+	return func(c *Client, r *Response) error {
+		return nil
+	}
+}
+
 type (
+	Middleware func(*Client, *Request) func(*Client, *Response) error
 	// RequestMiddleware type is for request middleware, called before a request is sent
 	RequestMiddleware func(*Client, *Request) error
 
@@ -134,9 +141,8 @@ type Client struct {
 	httpClient         *http.Client
 	proxyURL           *url.URL
 	beforeRequest      []RequestMiddleware
-	udBeforeRequest    []RequestMiddleware
+	Middleware         []Middleware
 	preReqHook         PreRequestHook
-	afterResponse      []ResponseMiddleware
 	requestLog         RequestLogCallback
 	responseLog        ResponseLogCallback
 	errorHooks         []ErrorHook
@@ -398,34 +404,6 @@ func (c *Client) R() *Request {
 // Get, Post, Put, Delete, Patch, Head, Options, etc.
 func (c *Client) NewRequest() *Request {
 	return c.R()
-}
-
-// OnBeforeRequest method appends request middleware into the before request chain.
-// Its gets applied after default Resty request middlewares and before request
-// been sent from Resty to host server.
-// 		client.OnBeforeRequest(func(c *resty.Client, r *resty.Request) error {
-//				// Now you have access to Client and Request instance
-//				// manipulate it as per your need
-//
-//				return nil 	// if its success otherwise return error
-//			})
-func (c *Client) OnBeforeRequest(m RequestMiddleware) *Client {
-	c.udBeforeRequest = append(c.udBeforeRequest, m)
-	return c
-}
-
-// OnAfterResponse method appends response middleware into the after response chain.
-// Once we receive response from host server, default Resty response middleware
-// gets applied and then user assigened response middlewares applied.
-// 		client.OnAfterResponse(func(c *resty.Client, r *resty.Response) error {
-//				// Now you have access to Client and Response instance
-//				// manipulate it as per your need
-//
-//				return nil 	// if its success otherwise return error
-//			})
-func (c *Client) OnAfterResponse(m ResponseMiddleware) *Client {
-	c.afterResponse = append(c.afterResponse, m)
-	return c
 }
 
 // OnError method adds a callback that will be run whenever a request execution fails.
@@ -898,10 +876,12 @@ func (c *Client) execute(req *Request) (*Response, error) {
 
 	// user defined on before request methods
 	// to modify the *resty.Request object
-	for _, f := range c.udBeforeRequest {
-		if err = f(c, req); err != nil {
-			return nil, wrapNoRetryErr(err)
-		}
+	callbacks := []func(*Client, *Response) error{}
+	for _, f := range c.Middleware {
+		// if err = f(c, req); err != nil {
+		// 	return nil, wrapNoRetryErr(err)
+		// }
+		callbacks = append(callbacks, f(c, req))
 	}
 
 	// resty middlewares
@@ -967,14 +947,17 @@ func (c *Client) execute(req *Request) (*Response, error) {
 
 	response.setReceivedAt() // after we read the body
 
-	// Apply Response middleware
-	for _, f := range c.afterResponse {
-		if err = f(c, response); err != nil {
+	for i := len(callbacks) - 1; i > 0; i-- {
+		if err = callbacks[i](c, response); err != nil {
 			break
 		}
 	}
 
 	return response, wrapNoRetryErr(err)
+}
+
+func (c *Client) Use(middlewares ...Middleware) {
+	c.Middleware = append(c.Middleware, middlewares...)
 }
 
 // getting TLS client config if not exists then create one
@@ -1099,16 +1082,6 @@ func createClient(hc *http.Client) *Client {
 		parseRequestBody,
 		createHTTPRequest,
 		addCredentials,
-	}
-
-	// user defined request middlewares
-	c.udBeforeRequest = []RequestMiddleware{}
-
-	// default after response middlewares
-	c.afterResponse = []ResponseMiddleware{
-		responseLogger,
-		parseResponseBody,
-		saveResponseIntoFile,
 	}
 
 	return c

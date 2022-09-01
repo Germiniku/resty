@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"crypto/tls"
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -78,27 +77,6 @@ func TestClientAuthScheme(t *testing.T) {
 	assertError(t, err2)
 	assertEqual(t, http.StatusOK, resp2.StatusCode())
 
-}
-
-func TestOnAfterMiddleware(t *testing.T) {
-	ts := createGenServer(t)
-	defer ts.Close()
-
-	c := dc()
-	c.OnAfterResponse(func(c *Client, res *Response) error {
-		t.Logf("Request sent at: %v", res.Request.Time)
-		t.Logf("Response Received at: %v", res.ReceivedAt())
-
-		return nil
-	})
-
-	resp, err := c.R().
-		SetBody("OnAfterResponse: This is plain text body to server").
-		Put(ts.URL + "/plaintext")
-
-	assertError(t, err)
-	assertEqual(t, http.StatusOK, resp.StatusCode())
-	assertEqual(t, "TestPut: plain text response", resp.String())
 }
 
 func TestClientRedirectPolicy(t *testing.T) {
@@ -234,9 +212,11 @@ func TestClientSetRootCertificateFromStringErrorTls(t *testing.T) {
 
 func TestClientOnBeforeRequestModification(t *testing.T) {
 	tc := dc()
-	tc.OnBeforeRequest(func(c *Client, r *Request) error {
+	tc.Use(func(c *Client, r *Request) func(*Client, *Response) error {
 		r.SetAuthToken("This is test auth token")
-		return nil
+		return func(c *Client, r *Response) error {
+			return nil
+		}
 	})
 
 	ts := createGetServer(t)
@@ -380,15 +360,6 @@ func TestClientOptions(t *testing.T) {
 
 	assertNil(t, transportErr)
 	assertEqual(t, true, transport.TLSClientConfig.InsecureSkipVerify)
-
-	client.OnBeforeRequest(func(c *Client, r *Request) error {
-		c.log.Debugf("I'm in Request middleware")
-		return nil // if it success
-	})
-	client.OnAfterResponse(func(c *Client, r *Response) error {
-		c.log.Debugf("I'm in Response middleware")
-		return nil // if it success
-	})
 
 	client.SetTimeout(5 * time.Second)
 	client.SetRedirectPolicy(FlexibleRedirectPolicy(10), func(req *http.Request, via []*http.Request) error {
@@ -648,44 +619,6 @@ func TestClientOnResponseError(t *testing.T) {
 			setup: func(client *Client) {
 				client.SetAuthToken("BAD")
 			},
-		},
-		{
-			name: "before_request_error",
-			setup: func(client *Client) {
-				client.OnBeforeRequest(func(client *Client, request *Request) error {
-					return fmt.Errorf("before request")
-				})
-			},
-			isError: true,
-		},
-		{
-			name: "before_request_error_retry",
-			setup: func(client *Client) {
-				client.SetRetryCount(3).OnBeforeRequest(func(client *Client, request *Request) error {
-					return fmt.Errorf("before request")
-				})
-			},
-			isError: true,
-		},
-		{
-			name: "after_response_error",
-			setup: func(client *Client) {
-				client.OnAfterResponse(func(client *Client, response *Response) error {
-					return fmt.Errorf("after response")
-				})
-			},
-			isError:     true,
-			hasResponse: true,
-		},
-		{
-			name: "after_response_error_retry",
-			setup: func(client *Client) {
-				client.SetRetryCount(3).OnAfterResponse(func(client *Client, response *Response) error {
-					return fmt.Errorf("after response")
-				})
-			},
-			isError:     true,
-			hasResponse: true,
 		},
 	}
 
